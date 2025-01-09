@@ -74,7 +74,7 @@ def process_table_or_subquery(identifier):
         if subquery:
             table_aliases.update(subquery)
     else:
-        table_alias = identifier.get_alias() or identifier.get_real_name()
+        table_alias = get_token_alias(identifier)
         table_aliases[table_alias] = extract_full_table_name(identifier)
 
     return table_aliases
@@ -89,7 +89,7 @@ def extract_subquery(parenthesis):
     subquery_alias = None
     for token in parenthesis.tokens:
         if isinstance(token, Identifier):
-            subquery_alias = token.get_alias()
+            subquery_alias = get_token_alias(token)
             break
 
     subquery_columns = extract_columns_from_query(subquery_content)
@@ -132,10 +132,7 @@ def extract_filter_conditions(statement):
 
 def parse_column(identifier, table_aliases, join_conditions, filter_conditions):
     columns = []
-    alias = None
-
-    if 'AS' in identifier.value.upper():
-        alias = identifier.get_alias()
+    alias = get_token_alias(identifier)
 
     if '(' in identifier.value:  # Handle expressions like (c.lastName || ...)
         sub_identifiers = [token for token in identifier.tokens if isinstance(token, Identifier)]
@@ -151,7 +148,7 @@ def parse_function(function, table_aliases, join_conditions, filter_conditions):
     """Parse aggregation functions like SUM, COUNT, etc."""
     columns = []
     column_name = function.get_parameters()[0].get_real_name() if function.get_parameters() else None
-    alias = function.get_alias()
+    alias = get_token_alias(function)
     table_alias = function.get_parent_name()
     table = table_aliases.get(table_alias, table_alias)
 
@@ -195,24 +192,9 @@ def build_column_metadata(identifier, alias, text, table_aliases, join_condition
     }
 
 
-# Example Query
-query = """
-select 
-    c.id,
-    c.dob as DOB,    
-    (c.lastName || ', ' || c.firstName || ' '+substr(c.middleName, 1, 1)) as fullName,
-    case when c.age > 18 then 'Adult' else 'Minor' end as AgeGroup,
-    sum(t.amount) as TotalSpent
-from (
-    select * from db1.customer
-) c
-left join (
-    select cid, amount from db2.transaction
-) t
-on c.id = t.cid
-where c.dob < '1980-01-01';
-"""
+def get_token_alias(token):
+    """Safely get alias from a token."""
+    if isinstance(token, (Identifier, Function)):
+        return token.get_alias()
+    return None
 
-# Extract and Print Columns
-output = extract_columns_from_query(query)
-print(output)
