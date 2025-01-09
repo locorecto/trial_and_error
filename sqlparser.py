@@ -1,5 +1,5 @@
 import sqlparse
-from sqlparse.sql import IdentifierList, Identifier, Token, Where, Comparison, Parenthesis
+from sqlparse.sql import IdentifierList, Identifier, Token, Where, Comparison, Parenthesis, Function
 from sqlparse.tokens import Keyword, DML, Wildcard, Name
 import json
 
@@ -31,6 +31,8 @@ def extract_columns_from_query(sql_query):
                     columns.extend(parse_column(identifier, table_aliases, join_conditions, filter_conditions))
             elif isinstance(token, Identifier):
                 columns.extend(parse_column(token, table_aliases, join_conditions, filter_conditions))
+            elif isinstance(token, Function):
+                columns.extend(parse_function(token, table_aliases, join_conditions, filter_conditions))
             elif token.ttype is Wildcard:
                 columns.append({
                     "name": "*",
@@ -57,7 +59,6 @@ def extract_table_aliases(statement):
         if from_seen and isinstance(token, Identifier):
             table_aliases.update(process_table_or_subquery(token))
         if from_seen and isinstance(token, Parenthesis):
-            # Handle nested queries directly within the FROM clause
             subquery = extract_subquery(token)
             if subquery:
                 table_aliases.update(subquery)
@@ -146,6 +147,30 @@ def parse_column(identifier, table_aliases, join_conditions, filter_conditions):
     return columns
 
 
+def parse_function(function, table_aliases, join_conditions, filter_conditions):
+    """Parse aggregation functions like SUM, COUNT, etc."""
+    columns = []
+    column_name = function.get_parameters()[0].get_real_name() if function.get_parameters() else None
+    alias = function.get_alias()
+    table_alias = function.get_parent_name()
+    table = table_aliases.get(table_alias, table_alias)
+
+    columns.append({
+        "name": column_name,
+        "alias": alias,
+        "section": "select",
+        "text": function.value,
+        "table": table,
+        "isJoinCondition": False,
+        "joinText": None,
+        "isFilterCondition": False,
+        "conditionText": None,
+        "isAggregation": True
+    })
+
+    return columns
+
+
 def build_column_metadata(identifier, alias, text, table_aliases, join_conditions, filter_conditions):
     table_alias = identifier.get_parent_name()
     table = table_aliases.get(table_alias, table_alias)
@@ -173,9 +198,11 @@ def build_column_metadata(identifier, alias, text, table_aliases, join_condition
 # Example Query
 query = """
 select 
- c.id,
- c.dob as DOB,    
- (c.lastName || ', ' || c.firstName || ' '+substr(c.middleName, 1, 1)) as fullName
+    c.id,
+    c.dob as DOB,    
+    (c.lastName || ', ' || c.firstName || ' '+substr(c.middleName, 1, 1)) as fullName,
+    case when c.age > 18 then 'Adult' else 'Minor' end as AgeGroup,
+    sum(t.amount) as TotalSpent
 from (
     select * from db1.customer
 ) c
